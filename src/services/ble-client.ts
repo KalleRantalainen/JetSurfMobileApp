@@ -14,42 +14,76 @@ export class JetSurfBleClient {
   private device: Device | null = null;
 
   async connect(): Promise<Device> {
+    console.log('[BLE] Connect requested');
     if (Platform.OS === 'android' && Platform.Version >= 31) {
       const permissions = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
       ]);
+      console.log('[BLE] Android permission result:', permissions);
       if (Object.values(permissions).some((permission) => permission !== PermissionsAndroid.RESULTS.GRANTED)) {
+        console.warn('[BLE] Bluetooth permission was denied');
         throw new Error('Bluetooth permission was denied.');
       }
     }
-    if ((await this.manager.state()) !== State.PoweredOn) {
+    const bluetoothState = await this.manager.state();
+    console.log('[BLE] Bluetooth state:', bluetoothState);
+    if (bluetoothState !== State.PoweredOn) {
+      console.warn('[BLE] Bluetooth is not powered on');
       throw new Error('Bluetooth is disabled or unavailable. Turn on Bluetooth and try again.');
     }
     return new Promise((resolve, reject) => {
       let settled = false;
-      this.manager.startDeviceScan([SERVICE_UUID], null, async (error, device) => {
+      let discoveredCount = 0;
+      console.log('[BLE] Starting scan. Target name: jetSurfBoard');
+      this.manager.startDeviceScan(null, null, async (error, device) => {
         if (error) {
+          console.error('[BLE] Scan error:', error.message, error);
           this.manager.stopDeviceScan();
           reject(error);
           return;
         }
-        if (!device || device.name !== 'jetSurfBoard') return;
+        if (!device) return;
+        discoveredCount += 1;
+        console.log('[BLE] Device discovered:', {
+          id: device.id,
+          name: device.name,
+          localName: device.localName,
+          serviceUUIDs: device.serviceUUIDs,
+          rssi: device.rssi,
+        });
+        const advertisedService = device.serviceUUIDs?.some(
+          (uuid) => uuid.toLowerCase() === SERVICE_UUID.toLowerCase(),
+        );
+        const advertisedName = device.name === 'jetSurfBoard' || device.localName === 'jetSurfBoard';
+        if (!advertisedName && !advertisedService) {
+          console.log('[BLE] Ignoring device: name/service did not match');
+          return;
+        }
+        console.log('[BLE] Matching JetSurf candidate:', device.id);
         this.manager.stopDeviceScan();
         try {
+          console.log('[BLE] Connecting to candidate:', device.id);
           const connected = await device.connect();
+          console.log('[BLE] Connected, discovering services and characteristics');
           await connected.discoverAllServicesAndCharacteristics();
           this.device = connected;
           settled = true;
+          console.log('[BLE] JetSurf connection ready:', connected.id);
           resolve(connected);
         } catch (connectionError) {
+          console.error('[BLE] Connection or service discovery failed:', connectionError);
+          settled = true;
           reject(connectionError);
         }
       });
       setTimeout(() => {
         if (!settled) {
           this.manager.stopDeviceScan();
-          reject(new Error('No JetSurf board found nearby.'));
+          const message = `No JetSurf board found. BLE devices discovered: ${discoveredCount}. See [BLE] logs in the Metro terminal.`;
+          console.warn(`[BLE] Scan timeout. ${message}`);
+          settled = true;
+          reject(new Error(message));
         }
       }, 12000);
     });
