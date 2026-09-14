@@ -5,13 +5,17 @@ import {
     COMMAND_UUID,
     decodeBase64,
     LOG_DATA_UUID,
+    LOG_HEADER_LENGTH,
     SERVICE_UUID,
+    TELEMETRY_PACKET_LENGTH,
     TELEMETRY_UUID,
 } from '@/services/ble-protocol';
 
 export class JetSurfBleClient {
   private readonly manager = new BleManager();
   private device: Device | null = null;
+  private telemetryBuffer: number[] = [];
+  private logBuffer: number[] = [];
 
   async connect(): Promise<Device> {
     console.log('[BLE] Connect requested');
@@ -65,8 +69,24 @@ export class JetSurfBleClient {
         try {
           console.log('[BLE] Connecting to candidate:', device.id);
           const connected = await device.connect();
+          if (Platform.OS === 'android') {
+            console.log('[BLE] Requesting Android MTU 196');
+            const mtuDevice = await connected.requestMTU(196);
+            console.log('[BLE] Negotiated Android MTU:', mtuDevice.mtu);
+          }
           console.log('[BLE] Connected, discovering services and characteristics');
           await connected.discoverAllServicesAndCharacteristics();
+          const services = await connected.services();
+          for (const service of services) {
+            const characteristics = await connected.characteristicsForService(service.uuid);
+            console.log('[BLE] GATT service:', service.uuid, 'characteristics:', characteristics.map((characteristic) => ({
+              uuid: characteristic.uuid,
+              isNotifiable: characteristic.isNotifiable,
+              isIndicatable: characteristic.isIndicatable,
+              isWritableWithResponse: characteristic.isWritableWithResponse,
+              isWritableWithoutResponse: characteristic.isWritableWithoutResponse,
+            })));
+          }
           this.device = connected;
           settled = true;
           console.log('[BLE] JetSurf connection ready:', connected.id);
@@ -91,15 +111,61 @@ export class JetSurfBleClient {
 
   subscribeToTelemetry(onValue: (bytes: Uint8Array) => void): Subscription {
     const device = this.requireDevice();
+    this.telemetryBuffer = [];
+    console.log('[BLE] Subscribing to telemetry:', SERVICE_UUID, TELEMETRY_UUID);
     return device.monitorCharacteristicForService(SERVICE_UUID, TELEMETRY_UUID, (error, characteristic) => {
-      if (!error && characteristic?.value) onValue(decodeBase64(characteristic.value));
+      if (error) {
+        console.error('[BLE] Telemetry notification error:', error.message, error);
+        return;
+      }
+      if (!characteristic?.value) {
+        console.warn('[BLE] Telemetry callback had no value');
+        return;
+      }
+      const bytes = decodeBase64(characteristic.value);
+      console.log('[BLE] Telemetry notification received:', bytes.byteLength, 'bytes');
+      this.telemetryBuffer.push(...bytes);
+      while (this.telemetryBuffer.length >= TELEMETRY_PACKET_LENGTH) {
+        const packet = new Uint8Array(this.telemetryBuffer.splice(0, TELEMETRY_PACKET_LENGTH));
+        console.log('[BLE] Complete telemetry packet reassembled:', packet.byteLength, 'bytes');
+        onValue(packet);
+      }
+      if (this.telemetryBuffer.length > 0) {
+        console.log('[BLE] Telemetry bytes buffered:', this.telemetryBuffer.length);
+      }
     });
   }
 
   subscribeToLogs(onValue: (bytes: Uint8Array) => void): Subscription {
     const device = this.requireDevice();
+    this.logBuffer = [];
+    console.log('[BLE] Subscribing to logs:', SERVICE_UUID, LOG_DATA_UUID);
     return device.monitorCharacteristicForService(SERVICE_UUID, LOG_DATA_UUID, (error, characteristic) => {
-      if (!error && characteristic?.value) onValue(decodeBase64(characteristic.value));
+      if (error) {
+        console.error('[BLE] Log notification error:', error.message, error);
+        return;
+      }
+      if (!characteristic?.value) {
+        console.warn('[BLE] Log callback had no value');
+        return;
+      }
+      const bytes = decodeBase64(characteristic.value);
+      console.log('[BLE] Log notification received:', bytes.byteLength, 'bytes');
+      this.logBuffer.push(...bytes);
+      while (this.logBuffer.length >= LOG_HEADER_LENGTH) {
+        const payloadLength = this.logBuffer[11] | (this.logBuffer[12] << 8);
+        if (payloadLength > 180) {
+          console.error('[BLE] Invalid log payload length in buffered data:', payloadLength);
+          this.logBuffer = [];
+          return;
+        }
+        const packetLength = LOG_HEADER_LENGTH + payloadLength;
+        if (this.logBuffer.length < packetLength) break;
+        const packet = new Uint8Array(this.logBuffer.splice(0, packetLength));
+        console.log('[BLE] Complete log packet reassembled:', packet.byteLength, 'bytes');
+        onValue(packet);
+      }
+      if (this.logBuffer.length > 0) console.log('[BLE] Log bytes buffered:', this.logBuffer.length);
     });
   }
 
@@ -111,6 +177,8 @@ export class JetSurfBleClient {
   async disconnect(): Promise<void> {
     if (this.device) await this.device.cancelConnection();
     this.device = null;
+    this.telemetryBuffer = [];
+    this.logBuffer = [];
   }
 
   destroy(): void {
