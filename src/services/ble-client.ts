@@ -16,6 +16,8 @@ export class JetSurfBleClient {
   private device: Device | null = null;
   private telemetryBuffer: number[] = [];
   private logBuffer: number[] = [];
+  private logPacketCount = 0;
+  private lastLogProgressAt = 0;
 
   async connect(): Promise<Device> {
     console.log('[BLE] Connect requested');
@@ -139,6 +141,8 @@ export class JetSurfBleClient {
   subscribeToLogs(onValue: (bytes: Uint8Array) => void): Subscription {
     const device = this.requireDevice();
     this.logBuffer = [];
+    this.logPacketCount = 0;
+    this.lastLogProgressAt = 0;
     console.log('[BLE] Subscribing to logs:', SERVICE_UUID, LOG_DATA_UUID);
     return device.monitorCharacteristicForService(SERVICE_UUID, LOG_DATA_UUID, (error, characteristic) => {
       if (error) {
@@ -150,7 +154,6 @@ export class JetSurfBleClient {
         return;
       }
       const bytes = decodeBase64(characteristic.value);
-      console.log('[BLE] Log notification received:', bytes.byteLength, 'bytes');
       this.logBuffer.push(...bytes);
       while (this.logBuffer.length >= LOG_HEADER_LENGTH) {
         const payloadLength = this.logBuffer[11] | (this.logBuffer[12] << 8);
@@ -162,7 +165,12 @@ export class JetSurfBleClient {
         const packetLength = LOG_HEADER_LENGTH + payloadLength;
         if (this.logBuffer.length < packetLength) break;
         const packet = new Uint8Array(this.logBuffer.splice(0, packetLength));
-        console.log('[BLE] Complete log packet reassembled:', packet.byteLength, 'bytes');
+        this.logPacketCount += 1;
+        const now = Date.now();
+        if (now - this.lastLogProgressAt >= 1000) {
+          console.log('[BLE] Log transfer packets received:', this.logPacketCount, 'latest packet:', packet.byteLength, 'bytes');
+          this.lastLogProgressAt = now;
+        }
         onValue(packet);
       }
       if (this.logBuffer.length > 0) console.log('[BLE] Log bytes buffered:', this.logBuffer.length);
@@ -179,6 +187,7 @@ export class JetSurfBleClient {
     this.device = null;
     this.telemetryBuffer = [];
     this.logBuffer = [];
+    this.logPacketCount = 0;
   }
 
   destroy(): void {
