@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
@@ -15,8 +15,8 @@ export function HintRow({ title = 'Try editing', hint = 'app/index.tsx' }: HintR
   return (
     <View style={styles.stepRow}>
       <ThemedText type="small">{title}</ThemedText>
-      <ThemedView type="backgroundSelected" style={styles.codeSnippet}>
-        <ThemedText themeColor="textSecondary">{hint}</ThemedText>
+      <ThemedView type="specialHighlight" style={styles.codeSnippet}>
+        <ThemedText themeColor="secondaryText">{hint}</ThemedText>
       </ThemedView>
     </View>
   );

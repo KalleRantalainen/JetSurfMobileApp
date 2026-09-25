@@ -1,13 +1,13 @@
 import {
-  Tabs,
   TabList,
-  TabTrigger,
-  TabSlot,
-  TabTriggerSlotProps,
   TabListProps,
+  Tabs,
+  TabSlot,
+  TabTrigger,
+  TabTriggerSlotProps,
 } from 'expo-router/ui';
 import { SymbolView } from 'expo-symbols';
-import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, useColorScheme, View } from 'react-native';
 
 import { ExternalLink } from './external-link';
 import { ThemedText } from './themed-text';
@@ -24,9 +24,6 @@ export default function AppTabs() {
           <TabTrigger name="home" href="/" asChild>
             <TabButton>Home</TabButton>
           </TabTrigger>
-          <TabTrigger name="explore" href="/explore" asChild>
-            <TabButton>Explore</TabButton>
-          </TabTrigger>
         </CustomTabList>
       </TabList>
     </Tabs>
@@ -37,9 +34,9 @@ export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps
   return (
     <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>
       <ThemedView
-        type={isFocused ? 'backgroundSelected' : 'backgroundElement'}
+        type={isFocused ? 'specialHighlight' : 'background'}
         style={styles.tabButtonView}>
-        <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'}>
+        <ThemedText type="small" themeColor={isFocused ? 'text' : 'secondaryText'}>
           {children}
         </ThemedText>
       </ThemedView>
@@ -53,7 +50,7 @@ export function CustomTabList(props: TabListProps) {
 
   return (
     <View {...props} style={styles.tabListContainer}>
-      <ThemedView type="backgroundElement" style={styles.innerContainer}>
+      <ThemedView type="background" style={styles.innerContainer}>
         <ThemedText type="smallBold" style={styles.brandText}>
           Expo Starter
         </ThemedText>
@@ -78,14 +75,15 @@ export function CustomTabList(props: TabListProps) {
 const styles = StyleSheet.create({
   tabListContainer: {
     position: 'absolute',
+    bottom: 0,
     width: '100%',
-    padding: Spacing.three,
+    padding: Spacing.one,
     justifyContent: 'center',
     alignItems: 'center',
     flexDirection: 'row',
   },
   innerContainer: {
-    paddingVertical: Spacing.two,
+    paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.five,
     borderRadius: Spacing.five,
     flexDirection: 'row',
@@ -101,7 +99,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   tabButtonView: {
-    paddingVertical: Spacing.one,
+    paddingVertical: Spacing.half,
     paddingHorizontal: Spacing.three,
     borderRadius: Spacing.three,
   },
